@@ -3,11 +3,17 @@ import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
+import { signOutFromApp } from '@/lib/supabase';
 import { colors } from '@/theme/colors';
 import { spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 
 export default function HomeTab() {
+  async function handleSignOut() {
+    await signOutFromApp();
+    router.replace('/');
+  }
+
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <View style={styles.content}>
@@ -20,7 +26,7 @@ export default function HomeTab() {
           label="Report an issue"
           onPress={() => router.push('/report-issue')}
         />
-        <Button label="Sign out" variant="outline" onPress={() => router.replace('/')} />
+        <Button label="Sign out" variant="outline" onPress={() => void handleSignOut()} />
       </View>
     </SafeAreaView>
   );

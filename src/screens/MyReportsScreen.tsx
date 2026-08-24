@@ -1,24 +1,53 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
-import {
-  getCitizenReports,
-  subscribeCitizenReports,
-  type CitizenReport,
-  type ReportPriority,
-  type ReportStatus,
-  type TimelineState,
-} from '@/lib/report-draft';
+import { getCurrentUser, supabase } from '@/lib/supabase';
 import { colors } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
 
-function categoryIcon(category: CitizenReport['category']) {
+type ReportPriority = 'High' | 'Medium' | 'Low';
+type ReportStatus = 'Reported' | 'Assigned' | 'In Progress' | 'Resolved' | 'Verified';
+type TimelineState = 'done' | 'current' | 'pending';
+
+type ReportRow = {
+  id: string;
+  ticket_id: string;
+  title: string;
+  category: string;
+  description: string;
+  status: string;
+  created_at: string;
+  location_text?: string | null;
+};
+
+type TimelineItem = {
+  key: string;
+  title: string;
+  timestamp?: string;
+  detail?: string;
+  state: TimelineState;
+};
+
+type ReportListItem = {
+  id: string;
+  ticketId: string;
+  title: string;
+  description: string;
+  category: string;
+  priority: ReportPriority;
+  status: ReportStatus;
+  dateLabel: string;
+  photoUri?: string;
+  timeline: TimelineItem[];
+};
+
+function categoryIcon(category: string) {
   switch (category) {
     case 'streetlight':
       return 'lightbulb' as const;
@@ -33,7 +62,7 @@ function categoryIcon(category: CitizenReport['category']) {
   }
 }
 
-function statusStyles(status: ReportStatus) {
+function statusStyles(status: ReportStatus | string) {
   if (status === 'In Progress') {
     return { backgroundColor: colors.primaryTint, color: colors.primary };
   }
@@ -83,8 +112,99 @@ function timelineIcon(state: TimelineState, title: string) {
 }
 
 export function MyReportsScreen() {
-  const reports = useSyncExternalStore(subscribeCitizenReports, getCitizenReports, getCitizenReports);
-  const [expandedId, setExpandedId] = useState<string | null>(reports[0]?.id ?? null);
+  const [reports, setReports] = useState<ReportListItem[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadReports() {
+      const { data: userData, error: userError } = await getCurrentUser();
+      if (userError || !userData.user) {
+        if (active) {
+          setReports([]);
+          setExpandedId(null);
+        }
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('civic_issues')
+        .select('*')
+        .eq('reporter_id', userData.user.id)
+        .order('created_at', { ascending: false });
+
+      if (!active) {
+        return;
+      }
+
+      if (error) {
+        setReports([]);
+        setExpandedId(null);
+        return;
+      }
+
+      const mapped: ReportListItem[] = (data ?? []).map((issue: ReportRow) => {
+        const status = (issue.status as ReportStatus) || 'Reported';
+        const category = issue.category || 'others';
+        const priority: ReportPriority =
+          category === 'pothole' || category === 'drainage'
+            ? 'High'
+            : category === 'streetlight'
+              ? 'Medium'
+              : 'Low';
+        const dateLabel = new Date(issue.created_at).toLocaleDateString('en-IN', {
+          day: 'numeric',
+          month: 'short',
+        });
+
+        const reportedState: TimelineState = status === 'Reported' ? 'current' : 'done';
+        const assignedState: TimelineState =
+          status === 'Assigned' ? 'current' : status === 'In Progress' || status === 'Resolved' || status === 'Verified' ? 'done' : 'pending';
+        const inProgressState: TimelineState =
+          status === 'In Progress' ? 'current' : status === 'Resolved' || status === 'Verified' ? 'done' : 'pending';
+        const resolvedState: TimelineState =
+          status === 'Resolved' || status === 'Verified' ? 'done' : 'pending';
+
+        const timeline: TimelineItem[] = [
+          {
+            key: 'reported',
+            title: 'Reported',
+            timestamp: `${dateLabel}, ${new Date(issue.created_at).toLocaleTimeString('en-IN', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}`,
+            detail: issue.location_text || 'Issue reported by citizen.',
+            state: reportedState,
+          },
+          { key: 'assigned', title: 'Assigned', state: assignedState },
+          { key: 'in-progress', title: 'In Progress', state: inProgressState },
+          { key: 'resolved', title: 'Resolved', state: resolvedState },
+        ];
+
+        return {
+          id: issue.id,
+          ticketId: issue.ticket_id,
+          title: issue.title,
+          description: issue.description,
+          category,
+          priority,
+          status,
+          dateLabel,
+          timeline,
+        };
+      });
+
+      setReports(mapped);
+      setExpandedId((current) => current ?? mapped[0]?.id ?? null);
+    }
+
+    void loadReports();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
@@ -106,10 +226,17 @@ export function MyReportsScreen() {
         </View>
 
         <View style={styles.list}>
-          {reports.map((report) => {
-            const expanded = expandedId === report.id;
-            const status = statusStyles(report.status);
-            const priority = priorityStyles(report.priority);
+          {reports.length === 0 ? (
+            <View style={styles.emptyState}>
+              <MaterialIcons color={colors.outline} name="assignment" size={32} />
+              <Text style={styles.emptyTitle}>No reports yet</Text>
+              <Text style={styles.emptyDescription}>Your submitted civic issues will appear here once you file the first report.</Text>
+            </View>
+          ) : (
+            reports.map((report) => {
+              const expanded = expandedId === report.id;
+              const status = statusStyles(report.status);
+              const priority = priorityStyles(report.priority);
 
             return (
               <Pressable
@@ -201,7 +328,8 @@ export function MyReportsScreen() {
                 ) : null}
               </Pressable>
             );
-          })}
+            })
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -241,6 +369,24 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: spacing.gutter,
+  },
+  emptyState: {
+    backgroundColor: colors.surfaceContainerLowest,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    borderRadius: radii.xl,
+    padding: spacing.stackMd,
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyTitle: {
+    ...typography.labelMd,
+    color: colors.onSurface,
+  },
+  emptyDescription: {
+    ...typography.bodyMd,
+    color: colors.onSurfaceVariant,
+    textAlign: 'center',
   },
   card: {
     backgroundColor: colors.surfaceContainerLowest,

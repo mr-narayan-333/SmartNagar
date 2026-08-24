@@ -1,15 +1,14 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -17,6 +16,7 @@ import { OfficialServiceBadge } from '@/components/brand/OfficialServiceBadge';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { TextField } from '@/components/ui/TextField';
+import { signInWithEmail, supabase } from '@/lib/supabase';
 import { colors } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
@@ -30,40 +30,41 @@ function notify(title: string, message: string) {
 }
 
 export function LoginScreen() {
-  const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
 
-  function handleGetOtp() {
-    const digits = phone.replace(/\D/g, '');
-    if (digits.length !== 10) {
-      notify('Invalid number', 'Enter a 10-digit mobile number to receive an OTP.');
+  useEffect(() => {
+    void supabase.auth.getSession().then(({ data }) => {
+      if (data.session) {
+        router.replace('/home');
+      }
+    });
+  }, []);
+
+  async function handleLogin() {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      notify('Email required', 'Enter a valid email address to continue.');
       return;
     }
-    setOtpSent(true);
-    setOtp((current) => (current.length >= 4 ? current : '1234'));
-  }
-
-  function handleLogin() {
-    const digits = phone.replace(/\D/g, '');
-    if (digits.length !== 10) {
-      notify('Invalid number', 'Enter a 10-digit mobile number.');
-      return;
-    }
-
-    if (!otpSent) {
-      notify('OTP required', 'Tap Get OTP, then enter the code to continue.');
+    if (password.length < 6) {
+      notify('Password required', 'Enter your password to continue.');
       return;
     }
 
-    const code = otp.replace(/\D/g, '');
-    if (code.length < 4) {
-      notify('Enter OTP', 'Enter the 4–6 digit OTP sent to your mobile number.');
+    const { data, error } = await signInWithEmail(trimmedEmail, password);
+    if (error) {
+      notify('Login failed', error.message);
       return;
     }
 
-    router.replace('/home');
+    if (data.session) {
+      router.replace('/home');
+      return;
+    }
+
+    notify('Login failed', 'Unable to sign in. Check your details and try again.');
   }
 
   return (
@@ -91,33 +92,26 @@ export function LoginScreen() {
 
             <View style={styles.form}>
               <TextField
-                autoComplete="tel"
-                keyboardType="phone-pad"
-                label="Mobile Number"
-                leftIcon="phone-iphone"
-                maxLength={10}
-                placeholder="Enter 10-digit number"
-                prefix="+91"
-                rightAccessory={
-                  <Pressable hitSlop={8} onPress={handleGetOtp}>
-                    <Text style={styles.getOtp}>{otpSent ? 'Resend' : 'Get OTP'}</Text>
-                  </Pressable>
-                }
-                value={phone}
-                onChangeText={(value) => setPhone(value.replace(/\D/g, '').slice(0, 10))}
+                autoCapitalize="none"
+                autoComplete="email"
+                keyboardType="email-address"
+                label="Email Address"
+                leftIcon="mail-outline"
+                placeholder="name@example.com"
+                value={email}
+                onChangeText={setEmail}
               />
 
-              {otpSent ? (
-                <TextField
-                  keyboardType="number-pad"
-                  label="OTP"
-                  leftIcon="lock-outline"
-                  maxLength={6}
-                  placeholder="Enter OTP"
-                  value={otp}
-                  onChangeText={(value) => setOtp(value.replace(/\D/g, '').slice(0, 6))}
-                />
-              ) : null}
+              <TextField
+                autoComplete="password"
+                label="Password"
+                leftIcon="lock-outline"
+                placeholder="Enter your password"
+                secureTextEntry
+                textContentType="password"
+                value={password}
+                onChangeText={setPassword}
+              />
 
               <Checkbox
                 checked={rememberMe}
@@ -126,7 +120,7 @@ export function LoginScreen() {
               />
 
               <View style={styles.actions}>
-                <Button icon="arrow-forward" label="Login" onPress={handleLogin} />
+                <Button icon="arrow-forward" label="Login" onPress={() => void handleLogin()} />
 
                 <View style={styles.dividerRow}>
                   <View style={styles.divider} />

@@ -2,22 +2,23 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
 import { TextField } from '@/components/ui/TextField';
 import {
-  addCitizenReport,
-  createTicketId,
-  DEPARTMENT_BY_TYPE,
-  getReportDraft,
-  ISSUE_TYPES,
-  MOCK_CONFIDENCE,
-  MOCK_LOCATION,
-  MOCK_PRIORITY,
-  parseIssueType,
+    addCitizenReport,
+    createTicketId,
+    DEPARTMENT_BY_TYPE,
+    getReportDraft,
+    ISSUE_TYPES,
+    MOCK_CONFIDENCE,
+    MOCK_LOCATION,
+    MOCK_PRIORITY,
+    parseIssueType,
 } from '@/lib/report-draft';
+import { createIssueRecord, getCurrentUser } from '@/lib/supabase';
 import { colors } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
@@ -52,12 +53,37 @@ export function AIClassificationScreen() {
     draft?.categoryLabel ??
     'Unknown';
 
-  function handleConfirm() {
+  async function handleConfirm() {
     if (!category) {
       return;
     }
 
+    const { data: userData, error: userError } = await getCurrentUser();
+    if (userError || !userData.user) {
+      Alert.alert('Login required', 'Please sign in before submitting an issue.');
+      router.replace('/');
+      return;
+    }
+
     const ticketId = createTicketId();
+    const description = notes.trim() || draft?.description || 'Submitted via SmartNagar.';
+    const { data, error } = await createIssueRecord({
+      reporterId: userData.user.id,
+      title: category.label,
+      category: category.value,
+      description,
+      locationText: MOCK_LOCATION.address,
+      latitude: Number.parseFloat(MOCK_LOCATION.lat),
+      longitude: Number.parseFloat(MOCK_LOCATION.lng),
+      status: 'Reported',
+    });
+
+    if (error) {
+      Alert.alert('Issue submission failed', error.message);
+      return;
+    }
+
+    const finalTicketId = data?.ticket_id ?? ticketId;
     const now = new Date();
     const dateLabel = now.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
     const timestamp = now.toLocaleString('en-IN', {
@@ -68,10 +94,10 @@ export function AIClassificationScreen() {
     });
 
     addCitizenReport({
-      id: ticketId,
-      ticketId,
+      id: finalTicketId,
+      ticketId: finalTicketId,
       title: category.label,
-      description: notes.trim() || draft?.description || 'Submitted via SmartNagar.',
+      description,
       category: category.value,
       priority: MOCK_PRIORITY,
       status: 'Reported',
@@ -93,7 +119,7 @@ export function AIClassificationScreen() {
 
     router.push({
       pathname: '/submission-success',
-      params: { ticketId },
+      params: { ticketId: finalTicketId },
     });
   }
 
@@ -194,7 +220,7 @@ export function AIClassificationScreen() {
 
           <View style={styles.actions}>
             <Button label="Cancel" variant="outline" onPress={() => router.back()} />
-            <Button icon="send" label="Confirm & Submit" onPress={handleConfirm} />
+            <Button icon="send" label="Confirm & Submit" onPress={() => void handleConfirm()} />
           </View>
 
           <Text style={styles.trust}>Official Government Portal • Data is securely processed.</Text>

@@ -3,20 +3,21 @@ import { Picker } from '@react-native-picker/picker';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { TextField } from '@/components/ui/TextField';
+import { signUpWithEmail, upsertProfile } from '@/lib/supabase';
 import { colors } from '@/theme/colors';
 import { radii, spacing } from '@/theme/spacing';
 import { typography } from '@/theme/typography';
@@ -30,23 +31,23 @@ const WARDS = [
 
 export function SignUpScreen() {
   const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [ward, setWard] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [wardFocused, setWardFocused] = useState(false);
 
-  function handleCreateAccount() {
+  async function handleCreateAccount() {
     const name = fullName.trim();
-    const digits = phone.replace(/\D/g, '');
+    const trimmedEmail = email.trim();
 
     if (!name) {
       Alert.alert('Full name required', 'Enter your full name to continue.');
       return;
     }
-    if (digits.length !== 10) {
-      Alert.alert('Invalid number', 'Enter a 10-digit mobile number.');
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      Alert.alert('Email required', 'Enter a valid email address to continue.');
       return;
     }
     if (!ward) {
@@ -62,7 +63,27 @@ export function SignUpScreen() {
       return;
     }
 
-    router.replace('/home');
+    const { data, error } = await signUpWithEmail(trimmedEmail, password, name);
+    if (error) {
+      Alert.alert('Sign up failed', error.message);
+      return;
+    }
+
+    const user = data.user;
+    if (user) {
+      const { error: profileError } = await upsertProfile(user.id, name, trimmedEmail);
+      if (profileError) {
+        Alert.alert('Profile update failed', profileError.message);
+      }
+    }
+
+    if (data.session) {
+      router.replace('/home');
+      return;
+    }
+
+    Alert.alert('Check your inbox', 'Your account was created. Sign in with your email and password to continue.');
+    router.replace('/');
   }
 
   return (
@@ -104,14 +125,13 @@ export function SignUpScreen() {
               />
 
               <TextField
-                autoComplete="tel"
-                keyboardType="phone-pad"
-                label="Phone Number"
-                maxLength={10}
-                placeholder="9876543210"
-                prefix="+91"
-                value={phone}
-                onChangeText={(value) => setPhone(value.replace(/\D/g, '').slice(0, 10))}
+                autoCapitalize="none"
+                autoComplete="email"
+                keyboardType="email-address"
+                label="Email Address"
+                placeholder="name@example.com"
+                value={email}
+                onChangeText={setEmail}
               />
 
               <View style={styles.fieldGroup}>
@@ -185,7 +205,7 @@ export function SignUpScreen() {
                 icon="arrow-forward"
                 label="Create Account"
                 style={styles.submit}
-                onPress={handleCreateAccount}
+                onPress={() => void handleCreateAccount()}
               />
             </View>
 
